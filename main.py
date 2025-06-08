@@ -23,54 +23,66 @@ def authenticate_user():
         client_secret=CLIENT_SECRET,
         redirect_uri=REDIRECT_URI,
         scope=SCOPE,
-        cache_path=".cache"
+        cache_path=None  # Desactivamos cache interna de Spotipy
     )
 
-    token_info = st.session_state.get(TOKEN_INFO_KEY)
-    if token_info:
+    token_info = None
+    is_cloud = "streamlit.app" in st.runtime.scriptrunner.script_run_context.get_script_run_ctx().main_script_path
+
+    # Si estamos en la nube y hay archivo de token, lo cargamos
+    if is_cloud and os.path.exists("token_cache.json"):
+        with open("token_cache.json", "r") as f:
+            token_info = json.load(f)
         if auth_manager.is_token_expired(token_info):
-            token_info = auth_manager.refresh_access_token(token_info["refresh_token"])
-            st.session_state[TOKEN_INFO_KEY] = token_info
+            try:
+                token_info = auth_manager.refresh_access_token(token_info["refresh_token"])
+                with open("token_cache.json", "w") as f:
+                    json.dump(token_info, f)
+            except:
+                token_info = None
+
+    # Si ya hay token en session_state (p. ej. recién autenticado)
+    if not token_info:
+        token_info = st.session_state.get(TOKEN_INFO_KEY)
+
+    if token_info:
+        st.session_state[TOKEN_INFO_KEY] = token_info
+        st.success("🔓 Ya estás autenticado con Spotify.")
         return token_info["access_token"]
 
+    # Si no hay token aún, pedir autorización manual
     with st.expander("🔐 Autorizar acceso a Spotify", expanded=True):
         auth_url = auth_manager.get_authorize_url()
         st.markdown(
             f"""
-            <div style="padding:15px;border-radius:10px;border:1px solid #1DB954;color:inherit;">
-            <h4 style="color:inherit;">📝 ¿Cómo autenticarte con Spotify?</h4>
-            <ol>
-                <li>Haz clic en <strong>“Autorizar en Spotify”</strong>. Se abrirá una nueva pestaña.</li>
-                <li>Inicia sesión y acepta los permisos.</li>
-                <li>Serás redirigido de nuevo a esta app.</li>
-                <li><strong>Copia la URL completa</strong> desde la barra del navegador.</li>
-                <li>Pégala en el cuadro de abajo y pulsa Enter.</li>
-            </ol>
-            </div><br>
+            <div style="background-color:#000;padding:10px;border-radius:8px;color:white">
+            <strong>1. Haz clic en el botón para autorizar:</strong><br>
             <a href="{auth_url}" target="_blank">
-                <button style="background-color:#1DB954;color:white;border:none;padding:10px 20px;border-radius:5px;font-size:16px;cursor:pointer;">
-                    🎧 Autorizar en Spotify
-                </button>
-            </a>
+            <button style="background-color:#1DB954;color:white;border:none;padding:8px 16px;border-radius:5px;">
+                Autorizar en Spotify
+            </button></a><br><br>
+            <strong>2. Después, pega aquí la URL a la que fuiste redirigido:</strong>
+            </div>
             """, unsafe_allow_html=True
         )
-
-        redirect_input = st.text_input(
-            "📋 Pega aquí la URL completa tras autorizar",
-            placeholder="https://genrer.streamlit.app/?code=..."
-        )
+        redirect_input = st.text_input("🔗 Pega aquí la URL después de autorizar")
 
         if redirect_input:
             code = auth_manager.parse_response_code(redirect_input)
             if code:
                 token_info = auth_manager.get_access_token(code)
                 st.session_state[TOKEN_INFO_KEY] = token_info
+
+                if is_cloud:
+                    with open("token_cache.json", "w") as f:
+                        json.dump(token_info, f)
+
                 st.success("✅ Autenticado con éxito, puedes continuar")
                 return token_info["access_token"]
             else:
-                st.error("⚠️ No se pudo extraer el código de la URL. Asegúrate de pegarla completa.")
-
+                st.error("⚠️ No se pudo extraer el código de la URL. Revisa que esté completa.")
     return None
+
 
 @st.cache_resource
 def create_spotify_client(access_token):
