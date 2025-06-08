@@ -37,7 +37,7 @@ def authenticate_user():
         auth_url = auth_manager.get_authorize_url()
         st.markdown(
             f"""
-            <div style="background-color:rgba(30,30,30,0.3);padding:15px;border-radius:10px;border:1px solid #1DB954;color:inherit;">
+            <div style="padding:15px;border-radius:10px;border:1px solid #1DB954;color:inherit;">
             <h4 style="color:inherit;">📝 ¿Cómo autenticarte con Spotify?</h4>
             <ol>
                 <li>Haz clic en <strong>“Autorizar en Spotify”</strong>. Se abrirá una nueva pestaña.</li>
