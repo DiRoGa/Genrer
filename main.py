@@ -14,10 +14,9 @@ CLIENT_ID = os.getenv("SPOTIPY_CLIENT_ID")
 CLIENT_SECRET = os.getenv("SPOTIPY_CLIENT_SECRET")
 REDIRECT_URI = os.getenv("SPOTIPY_REDIRECT_URI")
 SCOPE = "playlist-modify-public ugc-image-upload"
-
 TOKEN_INFO_KEY = "token_info"
 
-# --- Autenticación manual con ventana modal ---
+# --- Autenticación manual sin widgets en funciones cacheadas ---
 def authenticate_user():
     auth_manager = SpotifyOAuth(
         client_id=CLIENT_ID,
@@ -32,7 +31,7 @@ def authenticate_user():
         if auth_manager.is_token_expired(token_info):
             token_info = auth_manager.refresh_access_token(token_info["refresh_token"])
             st.session_state[TOKEN_INFO_KEY] = token_info
-        return spotipy.Spotify(auth=token_info["access_token"])
+        return token_info["access_token"]
 
     with st.expander("🔐 Autorizar acceso a Spotify", expanded=True):
         auth_url = auth_manager.get_authorize_url()
@@ -56,10 +55,14 @@ def authenticate_user():
                 token_info = auth_manager.get_access_token(code)
                 st.session_state[TOKEN_INFO_KEY] = token_info
                 st.success("✅ Autenticado con éxito, puedes continuar")
-                return spotipy.Spotify(auth=token_info["access_token"])
+                return token_info["access_token"]
             else:
                 st.error("⚠️ No se pudo extraer el código de la URL. Revisa que esté completa.")
     return None
+
+@st.cache_resource
+def create_spotify_client(access_token):
+    return spotipy.Spotify(auth=access_token)
 
 # --- Spotify Helpers ---
 def get_playlist_id_from_url(url):
@@ -150,9 +153,11 @@ def upload_cover_image(sp, playlist_id, image_file):
 st.set_page_config(page_title="🎧 Genrer", page_icon="🎵")
 st.title("🎧 Genrer: Spotify Genre Classifier")
 
-sp = authenticate_user()
-if not sp:
+access_token = authenticate_user()
+if not access_token:
     st.stop()
+
+sp = create_spotify_client(access_token)
 
 try:
     user_id = sp.current_user()["id"]
