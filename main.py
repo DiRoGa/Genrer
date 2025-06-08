@@ -13,7 +13,7 @@ from urllib.parse import urlparse, parse_qs
 load_dotenv()
 CLIENT_ID = os.getenv('SPOTIPY_CLIENT_ID')
 CLIENT_SECRET = os.getenv('SPOTIPY_CLIENT_SECRET')
-REDIRECT_URI = f"https://{st.runtime.scriptrunner.script_run_context().user_info.username}.streamlit.app"
+REDIRECT_URI = os.getenv("SPOTIPY_REDIRECT_URI")
 SCOPE = "playlist-modify-public ugc-image-upload"
 
 TOKEN_INFO_KEY = "token_info"
