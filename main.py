@@ -37,26 +37,28 @@ def authenticate_user():
         auth_url = auth_manager.get_authorize_url()
         st.markdown(
             f"""
-            <div style="background-color:#eef6f2;padding:15px;border-radius:10px;border:1px solid #1DB954">
-            <h4>📝 ¿Cómo autenticarte con Spotify?</h4>
+            <div style="background-color:rgba(30,30,30,0.3);padding:15px;border-radius:10px;border:1px solid #1DB954;color:inherit;">
+            <h4 style="color:inherit;">📝 ¿Cómo autenticarte con Spotify?</h4>
             <ol>
                 <li>Haz clic en <strong>“Autorizar en Spotify”</strong>. Se abrirá una nueva pestaña.</li>
                 <li>Inicia sesión y acepta los permisos.</li>
                 <li>Serás redirigido de nuevo a esta app.</li>
-                <li><strong>Copia la URL completa</strong> de esa página (la de arriba en tu navegador).</li>
-                <li>Pégala en el cuadro de abajo y presiona Enter.</li>
+                <li><strong>Copia la URL completa</strong> desde la barra del navegador.</li>
+                <li>Pégala en el cuadro de abajo y pulsa Enter.</li>
             </ol>
             </div><br>
             <a href="{auth_url}" target="_blank">
-                <button style="background-color:#1DB954;color:white;border:none;padding:10px 20px;border-radius:5px;font-size:16px;">
+                <button style="background-color:#1DB954;color:white;border:none;padding:10px 20px;border-radius:5px;font-size:16px;cursor:pointer;">
                     🎧 Autorizar en Spotify
                 </button>
             </a>
             """, unsafe_allow_html=True
         )
 
-        redirect_input = st.text_input("📋 Pega aquí la URL completa tras autorizar",
-                                       placeholder="https://genrer.streamlit.app/?code=...")
+        redirect_input = st.text_input(
+            "📋 Pega aquí la URL completa tras autorizar",
+            placeholder="https://genrer.streamlit.app/?code=..."
+        )
 
         if redirect_input:
             code = auth_manager.parse_response_code(redirect_input)
@@ -67,6 +69,7 @@ def authenticate_user():
                 return token_info["access_token"]
             else:
                 st.error("⚠️ No se pudo extraer el código de la URL. Asegúrate de pegarla completa.")
+
     return None
 
 @st.cache_resource
