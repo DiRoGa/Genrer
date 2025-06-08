@@ -8,7 +8,7 @@ import os
 import json
 import time
 
-# Cargar variables de entorno
+# --- Cargar credenciales ---
 load_dotenv()
 CLIENT_ID = os.getenv("SPOTIPY_CLIENT_ID")
 CLIENT_SECRET = os.getenv("SPOTIPY_CLIENT_SECRET")
@@ -16,83 +16,60 @@ REDIRECT_URI = os.getenv("SPOTIPY_REDIRECT_URI")
 SCOPE = "playlist-modify-public ugc-image-upload"
 TOKEN_INFO_KEY = "token_info"
 
-# --- Autenticación manual sin widgets en funciones cacheadas ---
-def authenticate_user():
+# --- Autenticación Spotify ---
+def get_spotify_client():
     auth_manager = SpotifyOAuth(
         client_id=CLIENT_ID,
         client_secret=CLIENT_SECRET,
         redirect_uri=REDIRECT_URI,
         scope=SCOPE,
-        cache_path=None  # Desactivamos cache interna de Spotipy
+        cache_path=".cache"
     )
 
-    token_info = None
-    is_cloud = "streamlit.app" in st.runtime.scriptrunner.script_run_context.get_script_run_ctx().main_script_path
+    token_info = st.session_state.get(TOKEN_INFO_KEY)
 
-    # Si estamos en la nube y hay archivo de token, lo cargamos
-    if is_cloud and os.path.exists("token_cache.json"):
-        with open("token_cache.json", "r") as f:
-            token_info = json.load(f)
-        if auth_manager.is_token_expired(token_info):
-            try:
-                token_info = auth_manager.refresh_access_token(token_info["refresh_token"])
-                with open("token_cache.json", "w") as f:
-                    json.dump(token_info, f)
-            except:
-                token_info = None
+    if token_info and not auth_manager.is_token_expired(token_info):
+        return spotipy.Spotify(auth=token_info['access_token'])
 
-    # Si ya hay token en session_state (p. ej. recién autenticado)
     if not token_info:
-        token_info = st.session_state.get(TOKEN_INFO_KEY)
+        token_info = auth_manager.get_cached_token()
+        if token_info:
+            st.session_state[TOKEN_INFO_KEY] = token_info
+            return spotipy.Spotify(auth=token_info['access_token'])
 
-    if token_info:
-        st.session_state[TOKEN_INFO_KEY] = token_info
-        st.success("🔓 Ya estás autenticado con Spotify.")
-        return token_info["access_token"]
-
-    # Si no hay token aún, pedir autorización manual
+    # Solicitar autenticación manual
+    auth_url = auth_manager.get_authorize_url()
     with st.expander("🔐 Autorizar acceso a Spotify", expanded=True):
-        auth_url = auth_manager.get_authorize_url()
         st.markdown(
             f"""
-            <div style="background-color:#000;padding:10px;border-radius:8px;color:white">
-            <strong>1. Haz clic en el botón para autorizar:</strong><br>
-            <a href="{auth_url}" target="_blank">
-            <button style="background-color:#1DB954;color:white;border:none;padding:8px 16px;border-radius:5px;">
-                Autorizar en Spotify
-            </button></a><br><br>
-            <strong>2. Después, pega aquí la URL a la que fuiste redirigido:</strong>
+            <div style="background-color:transparent;padding:10px;border-radius:8px;color:white">
+                <b>1. Haz clic en el botón para autorizar:</b><br>
+                <a href="{auth_url}" target="_blank">
+                    <button style="background-color:#1DB954;color:white;padding:8px 16px;border:none;border-radius:4px">
+                        Autorizar en Spotify
+                    </button>
+                </a><br><br>
+                <b>2. Luego, pega aquí la URL completa de redirección:</b>
             </div>
             """, unsafe_allow_html=True
         )
-        redirect_input = st.text_input("🔗 Pega aquí la URL después de autorizar")
+        redirect_response = st.text_input("🔗 Pega aquí la URL después de autorizar")
 
-        if redirect_input:
-            code = auth_manager.parse_response_code(redirect_input)
+        if redirect_response:
+            code = auth_manager.parse_response_code(redirect_response)
             if code:
-                token_info = auth_manager.get_access_token(code)
+                token_info = auth_manager.get_access_token(code, as_dict=True)
                 st.session_state[TOKEN_INFO_KEY] = token_info
-
-                if is_cloud:
-                    with open("token_cache.json", "w") as f:
-                        json.dump(token_info, f)
-
-                st.success("✅ Autenticado con éxito, puedes continuar")
-                return token_info["access_token"]
+                st.success("✅ Autenticación completada, ya puedes continuar")
+                return spotipy.Spotify(auth=token_info['access_token'])
             else:
-                st.error("⚠️ No se pudo extraer el código de la URL. Revisa que esté completa.")
+                st.error("⚠️ No se pudo obtener el código de autorización")
+
     return None
 
-
-@st.cache_resource
-def create_spotify_client(access_token):
-    return spotipy.Spotify(auth=access_token)
-
-# --- Spotify Helpers ---
+# --- Helpers Spotify ---
 def get_playlist_id_from_url(url):
-    if "playlist/" in url:
-        return url.split("playlist/")[1].split("?")[0]
-    return url
+    return url.split("playlist/")[1].split("?")[0] if "playlist/" in url else url
 
 def get_playlist_tracks(sp, playlist_id, max_tracks=50):
     tracks = []
@@ -109,17 +86,13 @@ def safe_get_artist(sp, artist_id):
             return sp.artist(artist_id)
         except spotipy.exceptions.SpotifyException as e:
             if e.http_status == 429:
-                retry_after = int(e.headers.get('Retry-After', 1))
-                st.error(f"⚠️ Spotify rate limit reached. Wait {retry_after} seconds.")
+                retry = int(e.headers.get('Retry-After', 1))
+                st.error(f"Spotify rate limit: esperar {retry} s")
                 st.stop()
-            else:
-                raise
+            raise
 
 def load_cache(filename="artist_genre_cache.json"):
-    if os.path.exists(filename):
-        with open(filename, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {}
+    return json.load(open(filename, "r", encoding="utf-8")) if os.path.exists(filename) else {}
 
 def save_cache(cache, filename="artist_genre_cache.json"):
     with open(filename, "w", encoding="utf-8") as f:
@@ -173,15 +146,13 @@ def upload_cover_image(sp, playlist_id, image_file):
     encoded = base64.b64encode(image_file.read())
     sp.playlist_upload_cover_image(playlist_id, encoded)
 
-# --- Streamlit UI ---
+# --- Interfaz Streamlit ---
 st.set_page_config(page_title="🎧 Genrer", page_icon="🎵")
 st.title("🎧 Genrer: Spotify Genre Classifier")
 
-access_token = authenticate_user()
-if not access_token:
+sp = get_spotify_client()
+if not sp:
     st.stop()
-
-sp = create_spotify_client(access_token)
 
 try:
     user_id = sp.current_user()["id"]
