@@ -7,23 +7,55 @@ import base64
 import os
 import time
 import json
+from urllib.parse import urlparse, parse_qs
 
 # Cargar variables de entorno
 load_dotenv()
 CLIENT_ID = os.getenv('SPOTIPY_CLIENT_ID')
 CLIENT_SECRET = os.getenv('SPOTIPY_CLIENT_SECRET')
-REDIRECT_URI = os.getenv('SPOTIPY_REDIRECT_URI') or 'http://localhost:8888/callback'
+REDIRECT_URI = f"https://{st.runtime.scriptrunner.script_run_context().user_info.username}.streamlit.app"
 SCOPE = "playlist-modify-public ugc-image-upload"
 
-# Autenticación con Spotify
-@st.cache_resource
-def authenticate_spotify():
-    return spotipy.Spotify(auth_manager=SpotifyOAuth(
+TOKEN_INFO_KEY = "token_info"
+
+def get_spotify_auth():
+    return SpotifyOAuth(
         client_id=CLIENT_ID,
         client_secret=CLIENT_SECRET,
         redirect_uri=REDIRECT_URI,
         scope=SCOPE
-    ))
+    )
+
+def authenticate_user():
+    auth_manager = get_spotify_auth()
+    token_info = st.session_state.get(TOKEN_INFO_KEY)
+
+    if token_info:
+        if auth_manager.is_token_expired(token_info):
+            token_info = auth_manager.refresh_access_token(token_info['refresh_token'])
+            st.session_state[TOKEN_INFO_KEY] = token_info
+        return spotipy.Spotify(auth=token_info['access_token'])
+
+    auth_url = auth_manager.get_authorize_url()
+    with st.expander("🔐 Autenticación requerida"):
+        st.markdown(f"#### Paso 1: [Haz clic aquí para autorizar Spotify]({auth_url})")
+        st.markdown("#### Paso 2: Una vez autorizado, serás redirigido. Copia la URL y pégala aquí:")
+        redirect_input = st.text_input("🔗 Pega aquí la URL después de autorizar")
+
+        if redirect_input:
+            code = parse_qs(urlparse(redirect_input).query).get("code")
+            if code:
+                token_info = auth_manager.get_access_token(code[0])
+                st.session_state[TOKEN_INFO_KEY] = token_info
+                st.rerun()
+            else:
+                st.error("❌ No se encontró el código en la URL.")
+
+    return None
+
+@st.cache_resource
+def get_spotify_client():
+    return authenticate_user()
 
 def get_playlist_id_from_url(url):
     if "playlist/" in url:
@@ -46,8 +78,7 @@ def safe_get_artist(sp, artist_id):
         except spotipy.exceptions.SpotifyException as e:
             if e.http_status == 429:
                 retry_after = int(e.headers.get('Retry-After', 1))
-                minutes = retry_after // 60
-                st.error(f"⚠️ Spotify API rate limit reached. Please try again in {minutes} minute(s).")
+                st.error(f"⚠️ Límite de uso de la API alcanzado. Intenta de nuevo en {retry_after} segundos.")
                 st.stop()
             else:
                 raise
@@ -110,51 +141,56 @@ def upload_cover_image(sp, playlist_id, image_file):
     encoded_string = base64.b64encode(image_file.read())
     sp.playlist_upload_cover_image(playlist_id, encoded_string)
 
-# Interfaz Streamlit
-st.title("🎧 Genrer: Spotify Genre Classifier")
+# --- STREAMLIT UI ---
+st.set_page_config(page_title="Genrer", layout="centered")
+st.title("🎧 Genrer: Clasifica tu playlist por géneros")
 
-sp = authenticate_spotify()
-user_id = sp.current_user()['id']
+sp = get_spotify_client()
+if sp is None:
+    st.stop()
+
+try:
+    user_id = sp.current_user()['id']
+except spotipy.exceptions.SpotifyException as e:
+    st.error(f"Error autenticando usuario: {e}")
+    st.stop()
 
 with st.form("playlist_form"):
-    playlist_url = st.text_input("🔗 Spotify playlist URL", "")
-    artist_filter = st.text_input("🎤 Artist filter (optional)", "")
-    lang_filter = st.text_input("🌍 ISO Language filter (optional, e.g. 'en', 'es')", "")
-    submitted = st.form_submit_button("Analyze Genres")
+    playlist_url = st.text_input("🔗 URL de tu playlist", "")
+    artist_filter = st.text_input("🎤 Filtro por artista (opcional)", "")
+    lang_filter = st.text_input("🌍 Filtro de idioma ISO (ej: 'en', 'es')", "")
+    submitted = st.form_submit_button("Analizar géneros")
 
 if submitted and playlist_url:
-    with st.spinner("🔍 Getting data from Spotify (limit: 50 tracks)..."):
+    with st.spinner("🔍 Analizando playlist..."):
         try:
             playlist_id = get_playlist_id_from_url(playlist_url)
             tracks = get_playlist_tracks(sp, playlist_id, max_tracks=50)
             if not tracks:
-                st.warning("No tracks found in this playlist.")
+                st.warning("No se encontraron canciones.")
             else:
                 genre_tracks = get_genres_from_tracks(sp, tracks, artist_filter, lang_filter)
                 st.session_state["genre_tracks"] = genre_tracks
                 st.session_state["playlist_id"] = playlist_id
-                st.success(f"{len(genre_tracks)} genres found.")
-        except spotipy.exceptions.SpotifyException as e:
-            st.error(f"Spotify error: {e}")
+                st.success(f"{len(genre_tracks)} géneros identificados.")
         except Exception as e:
-            st.error(f"Unexpected error: {e}")
+            st.error(f"❌ Error: {e}")
 
-# Si ya hay datos, mostrar opciones
 if "genre_tracks" in st.session_state:
     genre_tracks = st.session_state["genre_tracks"]
 
-    selected_genres = st.multiselect("🎼 Select genres to create a new playlist",
+    selected_genres = st.multiselect("🎼 Elige géneros para una nueva playlist",
                                      sorted(genre_tracks.keys()))
 
     if selected_genres:
-        playlist_name = st.text_input("📛 New playlist name", " + ".join(selected_genres)[:100])
-        cover_image = st.file_uploader("📷 Cover image (optional, JPG)", type=["jpg", "jpeg"])
+        playlist_name = st.text_input("📛 Nombre de la nueva playlist", " + ".join(selected_genres)[:100])
+        cover_image = st.file_uploader("📷 Imagen de portada (JPG)", type=["jpg", "jpeg"])
 
-        if st.button("🎵 Create playlist"):
-            combined_uris = list(set(uri for g in selected_genres for uri in genre_tracks[g]))
-            with st.spinner("🎁 Creating playlist..."):
-                pl_id, url = create_playlist(sp, user_id, playlist_name, combined_uris)
+        if st.button("🎵 Crear playlist"):
+            uris = list(set(uri for g in selected_genres for uri in genre_tracks[g]))
+            with st.spinner("🎁 Creando playlist..."):
+                pl_id, url = create_playlist(sp, user_id, playlist_name, uris)
                 if cover_image:
                     upload_cover_image(sp, pl_id, cover_image)
-                st.success("Playlist created successfully!")
-                st.markdown(f"🔗 [Open in Spotify]({url})")
+                st.success("¡Playlist creada con éxito!")
+                st.markdown(f"🔗 [Abrir en Spotify]({url})")
