@@ -10,7 +10,7 @@ This web application allows you to analyze the musical genres of a Spotify playl
    cd genrer
    ```
 
-2. Create a `.env` file with your Spotify credentials. You can use the included `.env` template as a reference.
+2. Create a `.env` file with your Spotify credentials.
 
 3. Install the dependencies:
    ```bash
