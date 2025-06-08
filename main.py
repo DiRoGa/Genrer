@@ -40,7 +40,7 @@ def authenticate_user():
             <div style="background-color:#f9f9f9;padding:10px;border-radius:8px">
             <strong>1. Haz clic en el botón para autorizar:</strong><br>
             <a href="{auth_url}" target="_blank">
-            <button style="background-color:#1DB954;color:white;border:none;padding:8px 16px;border-radius:5px;">
+            <button style="background-color:#1DB954;color:#f9f9f9;border:none;padding:8px 16px;border-radius:5px;">
                 Autorizar en Spotify
             </button></a><br><br>
             <strong>2. Después, pega aquí la URL a la que fuiste redirigido:</strong>
