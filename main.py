@@ -31,11 +31,15 @@ def get_playlist_id_from_url(url):
 
 def get_playlist_tracks(sp, playlist_id):
     tracks = []
-    results = sp.playlist_tracks(playlist_id)
-    tracks.extend(results['items'])
-    while results['next']:
-        results = sp.next(results)
+    try:
+        results = sp.playlist_tracks(playlist_id)
         tracks.extend(results['items'])
+        while results['next']:
+            results = sp.next(results)
+            tracks.extend(results['items'])
+    except Exception as e:
+        st.error(f"Error retrieving playlist tracks: {e}")
+        st.stop()
     return tracks
 
 def safe_get_artist(sp, artist_id):
@@ -53,47 +57,67 @@ def safe_get_artist(sp, artist_id):
 def get_genres_from_tracks(sp, tracks, artist_filter=None, language_filter=None):
     genre_tracks = {}
     visited_artists = {}
-    progress = st.progress(0)
+    progress_bar = st.progress(0)
+
     for idx, track in enumerate(tracks):
-        info = track.get('track')
-        if not info:
-            continue
-        artist = info['artists'][0]
-        name = artist['name']
-        aid = artist['id']
+        try:
+            info = track.get('track')
+            if not info:
+                continue
 
-        if artist_filter and artist_filter.lower() not in name.lower():
-            continue
-        if language_filter:
-            try:
-                if detect(name) != language_filter:
+            artist = info['artists'][0]
+            name = artist['name']
+            aid = artist['id']
+
+            if artist_filter and artist_filter.lower() not in name.lower():
+                continue
+
+            if language_filter:
+                try:
+                    if detect(name) != language_filter:
+                        continue
+                except Exception as e:
+                    st.warning(f"Could not detect language for '{name}': {e}")
                     continue
-            except:
-                pass
 
-        if aid in visited_artists:
-            genres = visited_artists[aid]
-        else:
-            time.sleep(0.2)
-            art = safe_get_artist(sp, aid)
-            genres = art.get('genres') or ['Unknown']
-            visited_artists[aid] = genres
+            if aid in visited_artists:
+                genres = visited_artists[aid]
+            else:
+                time.sleep(0.2)
+                try:
+                    art = safe_get_artist(sp, aid)
+                    genres = art.get('genres') or ['Unknown']
+                    visited_artists[aid] = genres
+                except Exception as e:
+                    st.warning(f"Error getting artist info for {name}: {e}")
+                    continue
 
-        for genre in genres:
-            genre_tracks.setdefault(genre, []).append(info['uri'])
+            for genre in genres:
+                genre_tracks.setdefault(genre, []).append(info['uri'])
 
-        progress.progress((idx + 1) / len(tracks))
+        except Exception as e:
+            st.warning(f"Error processing track: {e}")
+            continue
+
+        progress_bar.progress((idx + 1) / len(tracks))
 
     return genre_tracks
 
 def create_playlist(sp, user_id, name, uris):
-    pl = sp.user_playlist_create(user=user_id, name=name, public=True)
-    sp.playlist_add_items(pl['id'], uris)
-    return pl['id'], pl['external_urls']['spotify']
+    try:
+        pl = sp.user_playlist_create(user=user_id, name=name, public=True)
+        sp.playlist_add_items(pl['id'], uris)
+        return pl['id'], pl['external_urls']['spotify']
+    except Exception as e:
+        st.error(f"Error creating playlist: {e}")
+        return None, None
 
 def upload_cover_image(sp, playlist_id, image_file):
-    encoded_string = base64.b64encode(image_file.read())
-    sp.playlist_upload_cover_image(playlist_id, encoded_string)
+    try:
+        encoded_string = base64.b64encode(image_file.read())
+        sp.playlist_upload_cover_image(playlist_id, encoded_string)
+    except Exception as e:
+        st.warning(f"Error uploading cover image: {e}")
 
 # Streamlit Interface
 st.title("🎧 Genrer: Spotify Genre Classifier")
@@ -112,6 +136,10 @@ if submitted and playlist_url:
         try:
             playlist_id = get_playlist_id_from_url(playlist_url)
             tracks = get_playlist_tracks(sp, playlist_id)
+
+            # ⚠️ OPCIONAL: Limitar cantidad para debug
+            # tracks = tracks[:10]
+
             genre_tracks = get_genres_from_tracks(sp, tracks, artist_filter, lang_filter)
 
             st.session_state["genre_tracks"] = genre_tracks
@@ -136,8 +164,9 @@ if "genre_tracks" in st.session_state:
             combined_uris = list(set(uri for g in selected_genres for uri in genre_tracks[g]))
             pl_id, url = create_playlist(sp, user_id, playlist_name, combined_uris)
 
-            if cover_image:
+            if pl_id and cover_image:
                 upload_cover_image(sp, pl_id, cover_image)
 
-            st.success("Playlist created successfully!")
-            st.markdown(f"🔗 [Open in Spotify]({url})")
+            if pl_id:
+                st.success("Playlist created successfully!")
+                st.markdown(f"🔗 [Open in Spotify]({url})")
