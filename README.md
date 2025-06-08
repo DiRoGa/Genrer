@@ -38,7 +38,7 @@ SPOTIPY_REDIRECT_URI=http://localhost:8501
 
 ## 📸 Screenshots (optional)
 
-You can add screenshots in the `/assets` folder.
+![Example Image](https://github.com/DiRoGa/Genrer/blob/main/assets/example.png?raw=true)
 
 ## 📄 License
 
