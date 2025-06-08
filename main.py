@@ -37,17 +37,26 @@ def authenticate_user():
         auth_url = auth_manager.get_authorize_url()
         st.markdown(
             f"""
-            <div style="background-color:#f9f9f9;padding:10px;border-radius:8px">
-            <strong>1. Haz clic en el botón para autorizar:</strong><br>
+            <div style="background-color:#eef6f2;padding:15px;border-radius:10px;border:1px solid #1DB954">
+            <h4>📝 ¿Cómo autenticarte con Spotify?</h4>
+            <ol>
+                <li>Haz clic en <strong>“Autorizar en Spotify”</strong>. Se abrirá una nueva pestaña.</li>
+                <li>Inicia sesión y acepta los permisos.</li>
+                <li>Serás redirigido de nuevo a esta app.</li>
+                <li><strong>Copia la URL completa</strong> de esa página (la de arriba en tu navegador).</li>
+                <li>Pégala en el cuadro de abajo y presiona Enter.</li>
+            </ol>
+            </div><br>
             <a href="{auth_url}" target="_blank">
-            <button style="background-color:#1DB954;color:#f9f9f9;border:none;padding:8px 16px;border-radius:5px;">
-                Autorizar en Spotify
-            </button></a><br><br>
-            <strong>2. Después, pega aquí la URL a la que fuiste redirigido:</strong>
-            </div>
+                <button style="background-color:#1DB954;color:white;border:none;padding:10px 20px;border-radius:5px;font-size:16px;">
+                    🎧 Autorizar en Spotify
+                </button>
+            </a>
             """, unsafe_allow_html=True
         )
-        redirect_input = st.text_input("🔗 Pega aquí la URL después de autorizar")
+
+        redirect_input = st.text_input("📋 Pega aquí la URL completa tras autorizar",
+                                       placeholder="https://genrer.streamlit.app/?code=...")
 
         if redirect_input:
             code = auth_manager.parse_response_code(redirect_input)
@@ -57,7 +66,7 @@ def authenticate_user():
                 st.success("✅ Autenticado con éxito, puedes continuar")
                 return token_info["access_token"]
             else:
-                st.error("⚠️ No se pudo extraer el código de la URL. Revisa que esté completa.")
+                st.error("⚠️ No se pudo extraer el código de la URL. Asegúrate de pegarla completa.")
     return None
 
 @st.cache_resource
