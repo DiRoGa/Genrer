@@ -1,3 +1,5 @@
+import numpy as np
+import pandas as pd
 import streamlit as st
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
@@ -7,6 +9,7 @@ import base64
 import os
 import json
 import time
+import altair as alt
 
 # --- Cargar credenciales ---
 load_dotenv()
@@ -71,14 +74,14 @@ def get_spotify_client():
 def get_playlist_id_from_url(url):
     return url.split("playlist/")[1].split("?")[0] if "playlist/" in url else url
 
-def get_playlist_tracks(sp, playlist_id, max_tracks=50):
+def get_playlist_tracks(sp, playlist_id):
     tracks = []
-    results = sp.playlist_tracks(playlist_id, limit=max_tracks)
+    results = sp.playlist_tracks(playlist_id, limit=100)  # Spotify API máximo 100 por página
     tracks.extend(results['items'])
-    while results['next'] and len(tracks) < max_tracks:
+    while results['next']:
         results = sp.next(results)
         tracks.extend(results['items'])
-    return tracks[:max_tracks]
+    return tracks
 
 def safe_get_artist(sp, artist_id):
     while True:
@@ -170,13 +173,112 @@ if submitted and playlist_url:
     with st.spinner("🔍 Obteniendo canciones de Spotify..."):
         try:
             playlist_id = get_playlist_id_from_url(playlist_url)
-            tracks = get_playlist_tracks(sp, playlist_id, max_tracks=50)
+            tracks = get_playlist_tracks(sp, playlist_id)
             if not tracks:
                 st.warning("No se encontraron canciones.")
             else:
                 genres = get_genres_from_tracks(sp, tracks, artist_filter, lang_filter)
                 st.session_state["genres"] = genres
                 st.success(f"Géneros encontrados: {len(genres)}")
+
+                # --- Estadísticas de canciones ---
+                artist_genres_cache = load_cache()
+                rows = []
+
+                for t in tracks:
+                    info = t.get('track')
+                    if not info:
+                        continue
+
+                    track_name = info['name']
+                    popularity = info.get('popularity', np.nan)
+                    duration_sec = int(info.get('duration_ms', 0) / 1000)
+                    artists_names = ", ".join([a['name'] for a in info['artists']])
+                    main_artist_id = info['artists'][0]['id']
+
+                    if main_artist_id in artist_genres_cache:
+                        genres_list = artist_genres_cache[main_artist_id]
+                    else:
+                        art = safe_get_artist(sp, main_artist_id)
+                        genres_list = art.get('genres') or ['Unknown']
+                        artist_genres_cache[main_artist_id] = genres_list
+
+                    macro_genre = "Desconocido"
+                    for g in genres_list:
+                        simplified = g.lower()
+                        if "rap" in simplified or "trap" in simplified or "hip hop" in simplified:
+                            macro_genre = "Hip-Hop"
+                            break
+                        elif "pop" in simplified:
+                            macro_genre = "Pop"
+                            break
+                        elif "rock" in simplified or "indie" in simplified:
+                            macro_genre = "Rock"
+                            break
+                        elif "classical" in simplified:
+                            macro_genre = "Classical"
+                            break
+                        elif "jazz" in simplified:
+                            macro_genre = "Jazz"
+                            break
+                        elif "techno" in simplified or "electro" in simplified or "house" in simplified:
+                            macro_genre = "Electronic"
+                            break
+
+                    rows.append({
+                        "Canción": track_name,
+                        "Artistas": artists_names,
+                        "Popularidad": popularity,
+                        "Duración (s)": duration_sec,
+                        "Macro-género": macro_genre
+                    })
+
+                save_cache(artist_genres_cache)
+
+                df = pd.DataFrame(rows)
+
+                if not df.empty:
+                    with st.expander("📊 Estadísticas y análisis por Macro-género", expanded=True):
+                        st.dataframe(df)
+
+                        color_map = {
+                            "Hip-Hop": "#1f77b4", "Electronic": "#ff7f0e", "Pop": "#2ca02c",
+                            "Rock": "#d62728", "Classical": "#9467bd", "Jazz": "#8c564b"
+                        }
+
+                        # Canciones por género
+                        count_data = df.groupby("Macro-género").size().reset_index(name="Cantidad")
+                        chart1 = alt.Chart(count_data).mark_bar().encode(
+                            x=alt.X("Macro-género", sort="-y"),
+                            y="Cantidad",
+                            color=alt.Color("Macro-género", scale=alt.Scale(domain=list(color_map.keys()),
+                                                                            range=list(color_map.values()))),
+                            tooltip=["Macro-género", "Cantidad"]
+                        ).properties(title="Número de canciones por Macro-género")
+                        st.altair_chart(chart1, use_container_width=True)
+
+                        # Popularidad media
+                        pop_data = df.groupby("Macro-género")["Popularidad"].mean().reset_index()
+                        chart2 = alt.Chart(pop_data).mark_bar().encode(
+                            x=alt.X("Macro-género", sort="-y"),
+                            y=alt.Y("Popularidad", title="Popularidad media"),
+                            color=alt.Color("Macro-género", scale=alt.Scale(domain=list(color_map.keys()),
+                                                                            range=list(color_map.values()))),
+                            tooltip=["Macro-género", alt.Tooltip("Popularidad", format=".2f")]
+                        ).properties(title="Popularidad media por Macro-género")
+                        st.altair_chart(chart2, use_container_width=True)
+
+                        # Duración media
+                        dur_data = df.groupby("Macro-género")["Duración (s)"].mean().reset_index()
+                        chart3 = alt.Chart(dur_data).mark_bar().encode(
+                            x=alt.X("Macro-género", sort="-y"),
+                            y=alt.Y("Duración (s)", title="Duración media (s)"),
+                            color=alt.Color("Macro-género", scale=alt.Scale(domain=list(color_map.keys()),
+                                                                            range=list(color_map.values()))),
+                            tooltip=["Macro-género", alt.Tooltip("Duración (s)", format=".2f")]
+                        ).properties(title="Duración media por Macro-género")
+                        st.altair_chart(chart3, use_container_width=True)
+
         except Exception as e:
             st.error(f"Error: {e}")
 
