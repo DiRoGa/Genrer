@@ -59,7 +59,7 @@ def get_spotify_client():
             auth_url = auth_manager.get_authorize_url()
             st.sidebar.markdown("### 🔐 Autenticación con Spotify")
             st.sidebar.markdown(f"[🔗 Haz clic aquí para iniciar sesión con Spotify]({auth_url})")
-            code = st.experimental_get_query_params().get("code")
+            code = st.query_params().get("code")
             if code:
                 token_info = auth_manager.get_access_token(code[0])
         except Exception as e:
